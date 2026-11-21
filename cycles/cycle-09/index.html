@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Loading cycle…</title><style>
+:root{--bg:#f4f1ea;--paper:#fffdf8;--ink:#17191d;--muted:#6f736f;--line:#d9d5ca;--accent:#a7372d}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink)}main{width:min(430px,calc(100% - 36px));padding:28px;background:var(--paper);border:1px solid var(--line);border-radius:16px;text-align:center}.dot{width:28px;height:28px;border:3px solid #ddd6ca;border-top-color:var(--accent);border-radius:50%;margin:0 auto 16px;animation:s .8s linear infinite}@keyframes s{to{transform:rotate(360deg)}}h1{font-size:20px;margin:0 0 8px}p{font-size:13px;color:var(--muted);line-height:1.5;margin:0}a{color:var(--accent);font-weight:750}</style></head><body><main><div class="dot" id="dot"></div><h1 id="title">Opening cycle</h1><p id="msg">Decrypting the study environment in this browser.</p></main><script>
+const DATA_MAGIC='UYENDAT1',sessionKey='uyen.study.masterkey.v1',PARTS=2,MAX_UPDATES=99;
+function bytesToText(b){return new TextDecoder().decode(b)}
+function fromB64(s){const raw=atob(s),out=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)out[i]=raw.charCodeAt(i);return out}
+async function importMaster(raw){return crypto.subtle.importKey('raw',raw,{name:'AES-GCM'},false,['decrypt'])}
+async function decryptData(buf,key){const b=new Uint8Array(buf);if(b.length<36||bytesToText(b.slice(0,8))!==DATA_MAGIC)throw new Error('Invalid encrypted data');const iv=b.slice(8,20),ct=b.slice(20);return new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM',iv},key,ct))}
+function escapeAttr(value){return String(value).replace(/&/g,'&amp;').replace(/"/g,'&quot;')}
+function prepareYouTubeForGitHub(html){
+  const playerPage=new URL('../../shared/youtube-player.html',location.href).href;
+  html=html.replace(/<iframe\b[^>]*\bdata-video-id="([^"]+)"[^>]*>/g,(tag,videoId)=>{
+    const startMatch=tag.match(/\bsrc="[^"]*[?&]start=(\d+)/);const start=startMatch?startMatch[1]:'0';
+    const src=playerPage+'#v='+encodeURIComponent(videoId)+'&start='+encodeURIComponent(start);
+    return /\bsrc="[^"]*"/.test(tag)?tag.replace(/\bsrc="[^"]*"/,'src="'+escapeAttr(src)+'"'):tag;
+  });
+  html=html.replace(/initializeYouTubePlayers\(\);/g,'/* YouTube is handled by the GitHub bridge. */');
+  return html;
+}
+function installYouTubeBridge(frame){
+  const doc=frame.contentDocument,win=frame.contentWindow;if(!doc||!win||doc.getElementById('github-youtube-bridge'))return;
+  const script=doc.createElement('script');script.id='github-youtube-bridge';
+  script.textContent=`(() => {
+    'use strict';
+    const frames=[...document.querySelectorAll('iframe[data-video-id]')];
+    const tabForFrame=f=>String(f.id||'').replace(/^player-/,'');
+    const byTab=tab=>document.getElementById('player-'+tab);
+    function sec(value){const p=String(value||'0').trim().split(':').map(Number);if(p.some(Number.isNaN))return 0;if(p.length===3)return Math.max(0,p[0]*3600+p[1]*60+p[2]);if(p.length===2)return Math.max(0,p[0]*60+p[1]);return Math.max(0,p[0]||0)}
+    function status(tab,text){const f=byTab(tab);const label=f?.closest('.player-card')?.querySelector('.player-meta span');if(label)label.textContent=text}
+    function pauseFrame(f){if(!f)return;try{if(typeof f.contentWindow?.uyenPauseVideo==='function'){f.contentWindow.uyenPauseVideo();return}}catch(_){}try{f.contentWindow?.postMessage({type:'uyen-yt-pause'},'*')}catch(_){}}
+    function pauseAll(except){frames.forEach(f=>{if(f!==except)pauseFrame(f)})}
+    function playAt(f,seconds){if(!f)return false;try{if(typeof f.contentWindow?.uyenSeekAndPlay==='function')return f.contentWindow.uyenSeekAndPlay(seconds)!==false}catch(_){}try{f.contentWindow?.postMessage({type:'uyen-yt-seek',seconds},'*');return true}catch(_){return false}}
+    function markControl(control){const pane=control.closest('.skill-pane');if(!pane)return;pane.querySelectorAll('button.time').forEach(x=>x.classList.remove('active-time'));pane.querySelectorAll('.segment-jump').forEach(x=>x.classList.remove('active-segment'));pane.querySelectorAll('.tx-row').forEach(x=>x.classList.remove('playing-row'));if(control.classList.contains('time'))control.classList.add('active-time');if(control.classList.contains('segment-jump'))control.classList.add('active-segment');control.closest('.tx-row')?.classList.add('playing-row','is-current')}
+    function sync(tab,t){const pane=document.getElementById('pane-'+tab);if(!pane)return;const rows=[...pane.querySelectorAll('.tx-row[data-time]')];let current=null;for(const row of rows){if(sec(row.dataset.time)<=t+0.08)current=row;else break}rows.forEach(r=>r.classList.toggle('is-current',r===current));pane.querySelectorAll('button.time[data-video-time]').forEach(b=>b.classList.toggle('active-time',b.closest('.tx-row')===current));const sections=[...pane.querySelectorAll('.segment-jump[data-video-time]')];let active=null;for(const s of sections){if(sec(s.dataset.videoTime)<=t+0.08)active=s;else break}sections.forEach(s=>s.classList.toggle('active-segment',s===active))}
+    document.addEventListener('click',event=>{
+      const videoControl=event.target.closest('button.time[data-video-tab][data-video-time],button.segment-jump[data-video-tab][data-video-time]');
+      if(videoControl){event.preventDefault();event.stopImmediatePropagation();const tab=videoControl.dataset.videoTab,f=byTab(tab);const marked=Number(videoControl.dataset.videoMarked);const explicitSeek=Number(videoControl.dataset.videoSeek);const seconds=Number.isFinite(explicitSeek)?Math.max(0,explicitSeek):Math.max(0,(Number.isFinite(marked)?marked:sec(videoControl.dataset.videoTime))-.05);document.querySelectorAll('audio').forEach(a=>{try{a.pause()}catch(_){}});pauseAll(f);markControl(videoControl);if(playAt(f,seconds))status(tab,'Playing from '+videoControl.dataset.videoTime+'.');else status(tab,'Player is still loading. Click the timestamp again in a moment.');return;}
+      if(event.target.closest('.audio-time[data-audio-id],.main-tab-btn,.subtab-btn'))pauseAll(null);
+    },true);
+    window.addEventListener('message',event=>{const frame=frames.find(f=>f.contentWindow===event.source);if(!frame||!event.data)return;const tab=tabForFrame(frame),data=event.data;if(data.type==='uyen-yt-ready')status(tab,'Select a transcript time to play from that point.');if(data.type==='uyen-yt-not-ready')status(tab,'Player is still loading. Click the timestamp again in a moment.');if(data.type==='uyen-yt-autoplay-blocked')status(tab,'Playback was blocked. Press play once in the video, then use the timestamps.');if(data.type==='uyen-yt-error')status(tab,'YouTube could not play this video here. Use the YouTube link instead.');if(data.type==='uyen-yt-state'&&Number(data.state)===1){document.querySelectorAll('audio').forEach(a=>{try{a.pause()}catch(_){}});pauseAll(frame)}if(data.type==='uyen-yt-time')sync(tab,Number(data.seconds)||0);});
+  })();`;
+  doc.body.appendChild(script);
+}
+async function loadOptionalUpdates(key){
+  const out=[];
+  for(let i=1;i<=MAX_UPDATES;i++){
+    const name=`updates/u${String(i).padStart(3,'0')}.bin`,r=await fetch(name,{cache:'no-store'});
+    if(r.status===404)break;
+    if(!r.ok)throw new Error('Update unavailable: '+name);
+    const raw=await decryptData(await r.arrayBuffer(),key);
+    out.push(JSON.parse(bytesToText(raw)));
+  }
+  return out;
+}
+function applyUpdates(frame,updates){
+  if(!updates.length)return;
+  const api=frame.contentWindow?.UYEN_CYCLE9;if(!api||typeof api.applyUpdate!=='function')throw new Error('Cycle update interface unavailable');
+  for(const u of updates)api.applyUpdate(u);
+}
+async function load(){
+  const stored=sessionStorage.getItem(sessionKey);
+  if(!stored){location.replace('../../?next='+encodeURIComponent('cycles/'+location.pathname.split('/').filter(Boolean).slice(-1)[0]+'/'));return}
+  try{
+    const key=await importMaster(fromB64(stored)),chunks=[];
+    for(let i=1;i<=PARTS;i++){const name=`payload-${String(i).padStart(3,'0')}.bin`;const r=await fetch(name,{cache:'no-store'});if(!r.ok)throw new Error('Payload unavailable: '+name);chunks.push(await decryptData(await r.arrayBuffer(),key))}
+    const updates=await loadOptionalUpdates(key);
+    let total=0;for(const c of chunks)total+=c.length;const all=new Uint8Array(total);let off=0;for(const c of chunks){all.set(c,off);off+=c.length}
+    let html=new TextDecoder().decode(all);html=prepareYouTubeForGitHub(html);
+    const blob=new Blob([html],{type:'text/html;charset=utf-8'}),blobUrl=URL.createObjectURL(blob),frame=document.createElement('iframe');frame.title='Cycle 9 study environment';frame.src=blobUrl;frame.style.cssText='display:block;width:100%;height:100%;border:0;background:#f4f1ea;';frame.addEventListener('load',()=>{installYouTubeBridge(frame);applyUpdates(frame,updates)},{once:true});document.documentElement.style.cssText='width:100%;height:100%;margin:0;overflow:hidden;';document.body.style.cssText='width:100%;height:100%;margin:0;overflow:hidden;background:#f4f1ea;';document.body.replaceChildren(frame);window.addEventListener('pagehide',()=>URL.revokeObjectURL(blobUrl),{once:true});
+  }catch(e){console.error('Cycle load failed',e);sessionStorage.removeItem(sessionKey);document.getElementById('dot').style.display='none';document.getElementById('title').textContent='Unable to open cycle';document.getElementById('msg').innerHTML='The cycle files could not be opened. <a href="../../">Return to login</a>.'}
+}
+load();
+</script></body></html>
