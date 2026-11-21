@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Embedded video</title>
+<style>
+html,body,#player{width:100%;height:100%;margin:0;background:#000;overflow:hidden}
+body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+#status{position:absolute;inset:0;display:grid;place-items:center;padding:20px;color:#ddd;background:#111;text-align:center;font-size:13px;line-height:1.5;z-index:0}
+#player{position:relative;z-index:1}
+#player iframe{display:block;width:100%!important;height:100%!important;border:0}
+</style>
+</head>
+<body>
+<div id="status">Loading embedded video…</div>
+<div id="player"></div>
+<script>
+(() => {
+  'use strict';
+  const hash = new URLSearchParams(location.hash.slice(1));
+  const videoId = hash.get('v') || '';
+  const start = Math.max(0, Number(hash.get('start')) || 0);
+  const status = document.getElementById('status');
+  let player = null;
+  let ready = false;
+
+  function tell(type, extra = {}) {
+    parent.postMessage(Object.assign({type}, extra), '*');
+  }
+  function validVideoId(value) {
+    return /^[A-Za-z0-9_-]{6,20}$/.test(value);
+  }
+  function pause() {
+    if (!ready || !player) return;
+    try { player.pauseVideo(); } catch (_) {}
+  }
+  function seekAndPlay(seconds) {
+    if (!ready || !player) {
+      tell('uyen-yt-not-ready');
+      return false;
+    }
+    const t = Math.max(0, Number(seconds) || 0);
+    try {
+      player.seekTo(t, true);
+      player.playVideo();
+      return true;
+    } catch (_) {
+      tell('uyen-yt-error', {code: 'playback'});
+      return false;
+    }
+  }
+
+  // Same-origin callers can use these synchronously from a timestamp click.
+  window.uyenSeekAndPlay = seekAndPlay;
+  window.uyenPauseVideo = pause;
+
+  window.addEventListener('message', event => {
+    if (event.source !== parent || !event.data) return;
+    if (event.data.type === 'uyen-yt-seek') seekAndPlay(event.data.seconds);
+    if (event.data.type === 'uyen-yt-pause') pause();
+  });
+
+  if (!validVideoId(videoId)) {
+    status.textContent = 'Video unavailable.';
+    tell('uyen-yt-error', {code: 'invalid-id'});
+    return;
+  }
+
+  window.onYouTubeIframeAPIReady = () => {
+    player = new YT.Player('player', {
+      videoId,
+      playerVars: {
+        start: Math.floor(start),
+        rel: 0,
+        playsinline: 1,
+        enablejsapi: 1,
+        origin: location.origin
+      },
+      events: {
+        onReady: event => {
+          ready = true;
+          status.style.display = 'none';
+          try {
+            const iframe = event.target.getIframe();
+            iframe.setAttribute('allow', 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share');
+            iframe.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+          } catch (_) {}
+          tell('uyen-yt-ready');
+        },
+        onStateChange: event => tell('uyen-yt-state', {state: event.data}),
+        onError: event => tell('uyen-yt-error', {code: event.data}),
+        onAutoplayBlocked: () => tell('uyen-yt-autoplay-blocked')
+      }
+    });
+  };
+
+  const api = document.createElement('script');
+  api.src = 'https://www.youtube.com/iframe_api';
+  api.async = true;
+  api.onerror = () => {
+    status.textContent = 'Unable to load YouTube.';
+    tell('uyen-yt-error', {code: 'api'});
+  };
+  document.head.appendChild(api);
+
+  setInterval(() => {
+    if (!ready || !player) return;
+    try {
+      tell('uyen-yt-time', {
+        seconds: Number(player.getCurrentTime()) || 0,
+        state: player.getPlayerState()
+      });
+    } catch (_) {}
+  }, 250);
+})();
+</script>
+</body>
+</html>
